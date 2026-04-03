@@ -513,7 +513,7 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
       }
 
       function extractVideoId(line) {
-        const value = line.trim();
+        const value = line.trim().replace(/^\d+\.\s*/, "");
         if (!value) return null;
 
         if (/^[a-zA-Z0-9_-]{11}$/.test(value)) {
@@ -555,7 +555,7 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
       function parseQueue(rawText) {
         const lines = rawText
           .split(/\r?\n/)
-          .map((line) => line.trim())
+          .map((line) => line.trim().replace(/^\d+\.\s*/, ""))
           .filter(Boolean);
 
         const ids = [];
@@ -571,12 +571,27 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
         return ids.map((id) => `https://www.youtube.com/watch?v=${id}`).join("\n");
       }
 
+      function addNumberLabelsToInput() {
+        const rawLines = inputEl.value
+          .split(/\r?\n/)
+          .map((line) => line.trim().replace(/^\d+\.\s*/, ""))
+          .filter(Boolean);
+
+        if (!rawLines.length) {
+          inputEl.value = "";
+          return;
+        }
+
+        inputEl.value = rawLines.map((line, index) => `${index + 1}. ${line}`).join("\n");
+      }
+
       function syncPlaylistFromPreview(ids) {
         const nextIds = [...ids];
         const currentVideoId = queue[currentIndex];
 
         currentPreviewIds = nextIds;
         inputEl.value = idsToInputText(nextIds);
+        addNumberLabelsToInput();
         queue = [...nextIds];
 
         if (!queue.length) {
@@ -825,6 +840,7 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
         }
 
         inputEl.value = savedLists[name].content;
+        addNumberLabelsToInput();
         refreshPreviewFromInput();
         listNameInput.value = name;
         writePlaybackState();
@@ -849,6 +865,7 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
         reader.onload = () => {
           const text = typeof reader.result === "string" ? reader.result : "";
           inputEl.value = text;
+          addNumberLabelsToInput();
           refreshPreviewFromInput();
           writePlaybackState();
           setStatus("已從文字檔匯入內容。可直接播放或儲存成清單。");
@@ -925,7 +942,16 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
       deleteBtn.addEventListener("click", deleteSelectedList);
 
       importBtn.addEventListener("click", () => fileInput.click());
-      inputEl.addEventListener("input", refreshPreviewFromInput);
+      inputEl.addEventListener("blur", () => {
+        addNumberLabelsToInput();
+        refreshPreviewFromInput();
+      });
+      inputEl.addEventListener("paste", () => {
+        window.setTimeout(() => {
+          addNumberLabelsToInput();
+          refreshPreviewFromInput();
+        }, 0);
+      });
       fileInput.addEventListener("change", (event) => {
         const file = event.target.files && event.target.files[0];
         if (!file) return;
@@ -940,6 +966,7 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
       loadSavedLists();
       refreshSavedListOptions();
       restoreDraftFromPlaybackState();
+      addNumberLabelsToInput();
       refreshPreviewFromInput();
       initPlaybackPersistenceEvents();
 
