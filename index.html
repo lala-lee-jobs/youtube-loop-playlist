@@ -117,7 +117,8 @@
 
       #saveBtn,
       #loadBtn,
-      #importBtn {
+      #importBtn,
+      #exportBtn {
         background: #0ea5e9;
         color: #e0f2fe;
       }
@@ -196,6 +197,7 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
           <button id="loadBtn" type="button">載入選取清單</button>
           <button id="deleteBtn" type="button">刪除選取清單</button>
           <button id="importBtn" type="button">匯入記事本(txt)</button>
+          <button id="exportBtn" type="button">匯出目前清單(txt)</button>
           <input id="fileInput" type="file" accept=".txt,text/plain" hidden />
         </div>
 
@@ -233,6 +235,7 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
       const loadBtn = document.getElementById("loadBtn");
       const deleteBtn = document.getElementById("deleteBtn");
       const importBtn = document.getElementById("importBtn");
+      const exportBtn = document.getElementById("exportBtn");
 
       let savedLists = {};
 
@@ -420,6 +423,29 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
         reader.readAsText(file, "utf-8");
       }
 
+      function exportCurrentList() {
+        const content = inputEl.value.trim();
+        if (!content) {
+          setStatus("目前沒有可匯出的內容。", true);
+          return;
+        }
+
+        const rawName = listNameInput.value.trim() || "youtube-playlist";
+        const safeName = rawName.replace(/[<>:\"/\\\\|?*\\x00-\\x1f]/g, "_");
+        const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${safeName}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+
+        setStatus(`已匯出記事本檔：${safeName}.txt`);
+      }
+
       window.onYouTubeIframeAPIReady = function () {
         apiReady = true;
         ytPlayer = new YT.Player("player", {
@@ -476,6 +502,7 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
         importTxtFile(file);
         event.target.value = "";
       });
+      exportBtn.addEventListener("click", exportCurrentList);
 
       nextBtn.addEventListener("click", nextVideo);
       stopBtn.addEventListener("click", stopVideo);
