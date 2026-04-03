@@ -14,6 +14,7 @@
         --accent: #22c55e;
         --accent-hover: #16a34a;
         --danger: #ef4444;
+        --preview-action-gap: 16px;
       }
 
       * {
@@ -190,6 +191,7 @@
       .preview-link {
         display: block;
         text-decoration: none;
+        padding-top: var(--preview-action-gap);
       }
 
       .preview-link img {
@@ -215,18 +217,33 @@
       }
 
       .preview-delete {
+        all: unset;
+        box-sizing: border-box;
         position: absolute;
-        top: 6px;
-        right: 6px;
-        width: 26px;
-        height: 26px;
+        top: 8px;
+        right: 8px;
+        width: 30px;
+        height: 30px;
         border-radius: 999px;
-        border: 0;
         background: rgba(185, 28, 28, 0.9);
         color: #fee2e2;
         font-weight: 800;
+        font-size: 20px;
         line-height: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 3;
         cursor: pointer;
+        opacity: 0.75;
+        transition: opacity 0.15s ease, transform 0.15s ease;
+        pointer-events: auto;
+      }
+
+      .preview-delete:hover,
+      .preview-delete:focus-visible {
+        opacity: 1;
+        transform: scale(1.06);
       }
 
       code {
@@ -713,7 +730,7 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
           const deleteBtn = document.createElement("button");
           deleteBtn.type = "button";
           deleteBtn.className = "preview-delete";
-          deleteBtn.textContent = "×";
+          deleteBtn.textContent = "X";
           deleteBtn.title = "從清單刪除";
           deleteBtn.addEventListener("click", (event) => {
             event.preventDefault();
