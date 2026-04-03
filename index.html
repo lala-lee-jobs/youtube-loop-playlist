@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>YouTube 清單循環播放器</title>
+    <script src="https://www.youtube.com/iframe_api" defer></script>
     <style>
       :root {
         --bg: #0f172a;
@@ -212,7 +213,6 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
       </section>
     </main>
 
-    <script src="https://www.youtube.com/iframe_api"></script>
     <script>
       const STORAGE_KEY = "yt-loop-player-saved-lists";
 
@@ -220,6 +220,7 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
       let queue = [];
       let currentIndex = 0;
       let apiReady = false;
+      let pendingStart = false;
 
       const statusEl = document.getElementById("status");
       const metaEl = document.getElementById("meta");
@@ -242,6 +243,27 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
       function setStatus(message, isError = false) {
         statusEl.textContent = message;
         statusEl.classList.toggle("error", isError);
+      }
+
+      function startPlaybackFromInput() {
+        queue = parseQueue(inputEl.value);
+
+        if (!queue.length) {
+          setStatus("沒有解析到有效的 YouTube 連結或影片 ID。", true);
+          renderMeta();
+          return;
+        }
+
+        if (!apiReady || !ytPlayer) {
+          pendingStart = true;
+          setStatus("YouTube API 載入中，完成後會自動開始播放。");
+          return;
+        }
+
+        pendingStart = false;
+        currentIndex = 0;
+        renderMeta();
+        playAt(0);
       }
 
       function loadSavedLists() {
@@ -447,7 +469,6 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
       }
 
       window.onYouTubeIframeAPIReady = function () {
-        apiReady = true;
         ytPlayer = new YT.Player("player", {
           width: "100%",
           height: "100%",
@@ -458,7 +479,15 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
             playsinline: 1,
           },
           events: {
-            onReady: () => setStatus("播放器已就緒，請貼上連結後按開始播放。"),
+            onReady: () => {
+              apiReady = true;
+              if (pendingStart) {
+                setStatus("播放器已就緒，正在自動開始播放。");
+                startPlaybackFromInput();
+              } else {
+                setStatus("播放器已就緒，請貼上連結後按開始播放。");
+              }
+            },
             onStateChange: (event) => {
               if (event.data === YT.PlayerState.ENDED) {
                 nextVideo();
@@ -472,24 +501,7 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
         });
       };
 
-      startBtn.addEventListener("click", () => {
-        queue = parseQueue(inputEl.value);
-
-        if (!queue.length) {
-          setStatus("沒有解析到有效的 YouTube 連結或影片 ID。", true);
-          renderMeta();
-          return;
-        }
-
-        if (!apiReady || !ytPlayer) {
-          setStatus("YouTube API 尚未載入完成，請稍候再試。", true);
-          return;
-        }
-
-        currentIndex = 0;
-        renderMeta();
-        playAt(0);
-      });
+      startBtn.addEventListener("click", startPlaybackFromInput);
 
       saveBtn.addEventListener("click", saveCurrentList);
       loadBtn.addEventListener("click", loadSelectedList);
@@ -509,6 +521,8 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
 
       loadSavedLists();
       refreshSavedListOptions();
+
+      setStatus("正在載入 YouTube API，載入完成後即可播放。");
     </script>
   </body>
 </html>
