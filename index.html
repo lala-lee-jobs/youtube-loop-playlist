@@ -173,6 +173,8 @@
 
       .preview-item {
         position: relative;
+        display: flex;
+        flex-direction: column;
         border: 1px solid #374151;
         border-radius: 10px;
         overflow: hidden;
@@ -189,7 +191,9 @@
       }
 
       .preview-link {
-        display: block;
+        display: flex;
+        flex: 1;
+        flex-direction: column;
         text-decoration: none;
         padding-top: var(--preview-action-gap);
       }
@@ -214,6 +218,24 @@
         padding: 0 10px 10px;
         color: var(--muted);
         font-size: 0.74rem;
+      }
+
+      .preview-play {
+        display: block;
+        width: calc(100% - 20px);
+        margin: auto 10px 10px;
+        padding: 8px 10px;
+        border: 0;
+        border-radius: 8px;
+        background: #14532d;
+        color: #dcfce7;
+        font-size: 0.8rem;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      .preview-play:hover {
+        background: #166534;
       }
 
       .preview-delete {
@@ -316,6 +338,7 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
       let currentIndex = 0;
       let apiReady = false;
       let pendingStart = false;
+      let pendingStartIndex = 0;
       let playbackSaveTimer = null;
       let currentPreviewIds = [];
       let draggingIndex = -1;
@@ -461,7 +484,7 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
         return true;
       }
 
-      function startPlaybackFromInput() {
+      function startPlaybackAt(targetIndex = 0) {
         queue = parseQueue(inputEl.value);
         renderPreview(queue);
 
@@ -471,16 +494,28 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
           return;
         }
 
+        const safeIndex = Math.max(0, Math.min(Number(targetIndex) || 0, queue.length - 1));
+
         if (!apiReady || !ytPlayer) {
           pendingStart = true;
-          setStatus("YouTube API 載入中，完成後會自動開始播放。");
+          pendingStartIndex = safeIndex;
+          setStatus(`YouTube API 載入中，完成後會從第 ${safeIndex + 1} 支自動開始播放。`);
           return;
         }
 
         pendingStart = false;
-        currentIndex = 0;
+        pendingStartIndex = 0;
+        currentIndex = safeIndex;
         renderMeta();
-        playAt(0);
+        playAt(currentIndex);
+      }
+
+      function startPlaybackFromInput() {
+        startPlaybackAt(0);
+      }
+
+      function playFromPreview(index) {
+        startPlaybackAt(index);
       }
 
       function loadSavedLists() {
@@ -753,10 +788,21 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
             removePreviewItem(i);
           });
 
+          const playBtn = document.createElement("button");
+          playBtn.type = "button";
+          playBtn.className = "preview-play";
+          playBtn.textContent = "從這支播放";
+          playBtn.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            playFromPreview(i);
+          });
+
           link.appendChild(img);
           link.appendChild(titleEl);
           link.appendChild(idEl);
           item.appendChild(link);
+          item.appendChild(playBtn);
           item.appendChild(deleteBtn);
           previewGridEl.appendChild(item);
 
@@ -914,7 +960,7 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
               apiReady = true;
               if (pendingStart) {
                 setStatus("播放器已就緒，正在自動開始播放。");
-                startPlaybackFromInput();
+                startPlaybackAt(pendingStartIndex);
               } else if (!tryResumePlayback()) {
                 setStatus("播放器已就緒，請貼上連結後按開始播放。");
               } else {
