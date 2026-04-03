@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>YouTube 清單循環播放器</title>
+    <style>
+      :root {
+        --bg: #0f172a;
+        --panel: #111827;
+        --text: #e5e7eb;
+        --muted: #9ca3af;
+        --accent: #22c55e;
+        --accent-hover: #16a34a;
+        --danger: #ef4444;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+        background: radial-gradient(circle at top right, #1f2937, var(--bg));
+        color: var(--text);
+        min-height: 100vh;
+        display: flex;
+        justify-content: center;
+        align-items: flex-start;
+        padding: 24px;
+      }
+
+      .container {
+        width: 100%;
+        max-width: 980px;
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 16px;
+      }
+
+      .card {
+        background: color-mix(in oklab, var(--panel) 85%, black);
+        border: 1px solid #374151;
+        border-radius: 14px;
+        padding: 16px;
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 1.4rem;
+      }
+
+      p {
+        margin: 0;
+        color: var(--muted);
+      }
+
+      textarea {
+        width: 100%;
+        min-height: 160px;
+        resize: vertical;
+        border-radius: 10px;
+        border: 1px solid #4b5563;
+        background: #030712;
+        color: var(--text);
+        padding: 12px;
+        font-size: 0.95rem;
+        line-height: 1.4;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 12px;
+      }
+
+      button {
+        border: 0;
+        border-radius: 10px;
+        padding: 10px 14px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      #startBtn {
+        background: var(--accent);
+        color: #052e16;
+      }
+
+      #startBtn:hover {
+        background: var(--accent-hover);
+      }
+
+      #nextBtn {
+        background: #1d4ed8;
+        color: #dbeafe;
+      }
+
+      #stopBtn {
+        background: #374151;
+        color: #f9fafb;
+      }
+
+      .status {
+        margin-top: 10px;
+        font-size: 0.92rem;
+        color: var(--muted);
+      }
+
+      .status.error {
+        color: var(--danger);
+      }
+
+      .player-wrap {
+        position: relative;
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        background: #000;
+        border-radius: 12px;
+        overflow: hidden;
+      }
+
+      #player {
+        width: 100%;
+        height: 100%;
+      }
+
+      .meta {
+        margin-top: 10px;
+        font-size: 0.95rem;
+      }
+
+      code {
+        background: #111827;
+        padding: 1px 6px;
+        border-radius: 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="container">
+      <section class="card">
+        <h1>YouTube 清單循環播放器</h1>
+        <p>每行貼一個 YouTube 連結（或直接貼影片 ID），按「開始播放」後會自動循環。</p>
+      </section>
+
+      <section class="card">
+        <textarea
+          id="urlInput"
+          placeholder="https://www.youtube.com/watch?v=dQw4w9WgXcQ
+https://youtu.be/3JZ_D3ELwOQ
+https://www.youtube.com/shorts/aqz-KE-bpKQ"
+        ></textarea>
+
+        <div class="controls">
+          <button id="startBtn">開始播放</button>
+          <button id="nextBtn" type="button">下一支</button>
+          <button id="stopBtn" type="button">停止</button>
+        </div>
+
+        <div id="status" class="status">尚未開始播放。</div>
+      </section>
+
+      <section class="card">
+        <div class="player-wrap">
+          <div id="player"></div>
+        </div>
+        <div id="meta" class="meta">目前播放：<code>-</code></div>
+      </section>
+    </main>
+
+    <script src="https://www.youtube.com/iframe_api"></script>
+    <script>
+      let ytPlayer;
+      let queue = [];
+      let currentIndex = 0;
+      let apiReady = false;
+
+      const statusEl = document.getElementById("status");
+      const metaEl = document.getElementById("meta");
+      const inputEl = document.getElementById("urlInput");
+      const startBtn = document.getElementById("startBtn");
+      const nextBtn = document.getElementById("nextBtn");
+      const stopBtn = document.getElementById("stopBtn");
+
+      function setStatus(message, isError = false) {
+        statusEl.textContent = message;
+        statusEl.classList.toggle("error", isError);
+      }
+
+      function extractVideoId(line) {
+        const value = line.trim();
+        if (!value) return null;
+
+        // 直接輸入影片 ID
+        if (/^[a-zA-Z0-9_-]{11}$/.test(value)) {
+          return value;
+        }
+
+        // 嘗試解析 URL
+        try {
+          const url = new URL(value);
+
+          if (url.hostname.includes("youtu.be")) {
+            const id = url.pathname.split("/").filter(Boolean)[0];
+            return id && id.length === 11 ? id : null;
+          }
+
+          if (url.searchParams.get("v")) {
+            const id = url.searchParams.get("v");
+            return id && id.length === 11 ? id : null;
+          }
+
+          const parts = url.pathname.split("/").filter(Boolean);
+          const shortsIndex = parts.indexOf("shorts");
+          if (shortsIndex >= 0 && parts[shortsIndex + 1]) {
+            const id = parts[shortsIndex + 1];
+            return id.length === 11 ? id : null;
+          }
+
+          const embedIndex = parts.indexOf("embed");
+          if (embedIndex >= 0 && parts[embedIndex + 1]) {
+            const id = parts[embedIndex + 1];
+            return id.length === 11 ? id : null;
+          }
+        } catch (_) {
+          return null;
+        }
+
+        return null;
+      }
+
+      function parseQueue(rawText) {
+        const lines = rawText
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean);
+
+        const ids = [];
+        for (const line of lines) {
+          const id = extractVideoId(line);
+          if (id) ids.push(id);
+        }
+
+        return [...new Set(ids)];
+      }
+
+      function renderMeta() {
+        if (!queue.length) {
+          metaEl.innerHTML = "目前播放：<code>-</code>";
+          return;
+        }
+        metaEl.innerHTML = `目前播放：第 <code>${currentIndex + 1}</code> / <code>${queue.length}</code> 支，ID <code>${queue[currentIndex]}</code>`;
+      }
+
+      function playAt(index) {
+        if (!ytPlayer || !queue.length) return;
+        currentIndex = (index + queue.length) % queue.length;
+        const videoId = queue[currentIndex];
+        ytPlayer.loadVideoById(videoId);
+        renderMeta();
+        setStatus(`正在播放第 ${currentIndex + 1} 支影片。`);
+      }
+
+      function nextVideo() {
+        if (!queue.length) {
+          setStatus("清單是空的，請先貼上連結。", true);
+          return;
+        }
+        playAt(currentIndex + 1);
+      }
+
+      function stopVideo() {
+        if (ytPlayer && typeof ytPlayer.stopVideo === "function") {
+          ytPlayer.stopVideo();
+          setStatus("已停止播放。");
+        }
+      }
+
+      window.onYouTubeIframeAPIReady = function () {
+        apiReady = true;
+        ytPlayer = new YT.Player("player", {
+          width: "100%",
+          height: "100%",
+          videoId: "",
+          playerVars: {
+            rel: 0,
+            modestbranding: 1,
+            playsinline: 1,
+          },
+          events: {
+            onReady: () => setStatus("播放器已就緒，請貼上連結後按開始播放。"),
+            onStateChange: (event) => {
+              if (event.data === YT.PlayerState.ENDED) {
+                nextVideo();
+              }
+            },
+            onError: () => {
+              setStatus("有影片無法播放，已嘗試切到下一支。", true);
+              nextVideo();
+            },
+          },
+        });
+      };
+
+      startBtn.addEventListener("click", () => {
+        queue = parseQueue(inputEl.value);
+
+        if (!queue.length) {
+          setStatus("沒有解析到有效的 YouTube 連結或影片 ID。", true);
+          renderMeta();
+          return;
+        }
+
+        if (!apiReady || !ytPlayer) {
+          setStatus("YouTube API 尚未載入完成，請稍候再試。", true);
+          return;
+        }
+
+        currentIndex = 0;
+        renderMeta();
+        playAt(0);
+      });
+
+      nextBtn.addEventListener("click", nextVideo);
+      stopBtn.addEventListener("click", stopVideo);
+    </script>
+  </body>
+</html>
