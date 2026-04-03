@@ -56,22 +56,34 @@
         color: var(--muted);
       }
 
-      textarea {
+      textarea,
+      input,
+      select {
         width: 100%;
-        min-height: 160px;
-        resize: vertical;
         border-radius: 10px;
         border: 1px solid #4b5563;
         background: #030712;
         color: var(--text);
-        padding: 12px;
+        padding: 10px 12px;
         font-size: 0.95rem;
+      }
+
+      textarea {
+        min-height: 160px;
+        resize: vertical;
         line-height: 1.4;
       }
 
       .controls {
         display: flex;
         flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 12px;
+      }
+
+      .saved-row {
+        display: grid;
+        grid-template-columns: 1fr;
         gap: 10px;
         margin-top: 12px;
       }
@@ -101,6 +113,18 @@
       #stopBtn {
         background: #374151;
         color: #f9fafb;
+      }
+
+      #saveBtn,
+      #loadBtn,
+      #importBtn {
+        background: #0ea5e9;
+        color: #e0f2fe;
+      }
+
+      #deleteBtn {
+        background: #b91c1c;
+        color: #fee2e2;
       }
 
       .status {
@@ -160,6 +184,21 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
           <button id="stopBtn" type="button">停止</button>
         </div>
 
+        <div class="saved-row">
+          <input id="listNameInput" type="text" placeholder="輸入清單名稱（例如：睡前歌單）" />
+          <select id="savedListSelect">
+            <option value="">請選擇已儲存清單</option>
+          </select>
+        </div>
+
+        <div class="controls">
+          <button id="saveBtn" type="button">儲存目前清單</button>
+          <button id="loadBtn" type="button">載入選取清單</button>
+          <button id="deleteBtn" type="button">刪除選取清單</button>
+          <button id="importBtn" type="button">匯入記事本(txt)</button>
+          <input id="fileInput" type="file" accept=".txt,text/plain" hidden />
+        </div>
+
         <div id="status" class="status">尚未開始播放。</div>
       </section>
 
@@ -173,6 +212,8 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
 
     <script src="https://www.youtube.com/iframe_api"></script>
     <script>
+      const STORAGE_KEY = "yt-loop-player-saved-lists";
+
       let ytPlayer;
       let queue = [];
       let currentIndex = 0;
@@ -181,25 +222,62 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
       const statusEl = document.getElementById("status");
       const metaEl = document.getElementById("meta");
       const inputEl = document.getElementById("urlInput");
+      const listNameInput = document.getElementById("listNameInput");
+      const savedListSelect = document.getElementById("savedListSelect");
+      const fileInput = document.getElementById("fileInput");
+
       const startBtn = document.getElementById("startBtn");
       const nextBtn = document.getElementById("nextBtn");
       const stopBtn = document.getElementById("stopBtn");
+      const saveBtn = document.getElementById("saveBtn");
+      const loadBtn = document.getElementById("loadBtn");
+      const deleteBtn = document.getElementById("deleteBtn");
+      const importBtn = document.getElementById("importBtn");
+
+      let savedLists = {};
 
       function setStatus(message, isError = false) {
         statusEl.textContent = message;
         statusEl.classList.toggle("error", isError);
       }
 
+      function loadSavedLists() {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          savedLists = raw ? JSON.parse(raw) : {};
+        } catch (_) {
+          savedLists = {};
+        }
+      }
+
+      function persistSavedLists() {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(savedLists));
+      }
+
+      function refreshSavedListOptions(selectedName = "") {
+        savedListSelect.innerHTML = '<option value="">請選擇已儲存清單</option>';
+        const names = Object.keys(savedLists).sort((a, b) => a.localeCompare(b, "zh-Hant"));
+
+        for (const name of names) {
+          const option = document.createElement("option");
+          option.value = name;
+          option.textContent = name;
+          savedListSelect.appendChild(option);
+        }
+
+        if (selectedName && savedLists[selectedName]) {
+          savedListSelect.value = selectedName;
+        }
+      }
+
       function extractVideoId(line) {
         const value = line.trim();
         if (!value) return null;
 
-        // 直接輸入影片 ID
         if (/^[a-zA-Z0-9_-]{11}$/.test(value)) {
           return value;
         }
 
-        // 嘗試解析 URL
         try {
           const url = new URL(value);
 
@@ -252,6 +330,7 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
           metaEl.innerHTML = "目前播放：<code>-</code>";
           return;
         }
+
         metaEl.innerHTML = `目前播放：第 <code>${currentIndex + 1}</code> / <code>${queue.length}</code> 支，ID <code>${queue[currentIndex]}</code>`;
       }
 
@@ -277,6 +356,68 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
           ytPlayer.stopVideo();
           setStatus("已停止播放。");
         }
+      }
+
+      function saveCurrentList() {
+        const name = listNameInput.value.trim();
+        const content = inputEl.value.trim();
+
+        if (!name) {
+          setStatus("請先輸入清單名稱。", true);
+          return;
+        }
+
+        if (!content) {
+          setStatus("目前沒有可儲存的內容。", true);
+          return;
+        }
+
+        savedLists[name] = {
+          content,
+          updatedAt: new Date().toISOString(),
+        };
+
+        persistSavedLists();
+        refreshSavedListOptions(name);
+        setStatus(`已儲存清單：${name}`);
+      }
+
+      function loadSelectedList() {
+        const name = savedListSelect.value;
+        if (!name || !savedLists[name]) {
+          setStatus("請先選擇要載入的清單。", true);
+          return;
+        }
+
+        inputEl.value = savedLists[name].content;
+        listNameInput.value = name;
+        setStatus(`已載入清單：${name}`);
+      }
+
+      function deleteSelectedList() {
+        const name = savedListSelect.value;
+        if (!name || !savedLists[name]) {
+          setStatus("請先選擇要刪除的清單。", true);
+          return;
+        }
+
+        delete savedLists[name];
+        persistSavedLists();
+        refreshSavedListOptions();
+        setStatus(`已刪除清單：${name}`);
+      }
+
+      function importTxtFile(file) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const text = typeof reader.result === "string" ? reader.result : "";
+          inputEl.value = text;
+          setStatus("已從文字檔匯入內容。可直接播放或儲存成清單。");
+        };
+        reader.onerror = () => {
+          setStatus("文字檔匯入失敗，請重試。", true);
+        };
+        reader.readAsText(file, "utf-8");
       }
 
       window.onYouTubeIframeAPIReady = function () {
@@ -324,8 +465,23 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
         playAt(0);
       });
 
+      saveBtn.addEventListener("click", saveCurrentList);
+      loadBtn.addEventListener("click", loadSelectedList);
+      deleteBtn.addEventListener("click", deleteSelectedList);
+
+      importBtn.addEventListener("click", () => fileInput.click());
+      fileInput.addEventListener("change", (event) => {
+        const file = event.target.files && event.target.files[0];
+        if (!file) return;
+        importTxtFile(file);
+        event.target.value = "";
+      });
+
       nextBtn.addEventListener("click", nextVideo);
       stopBtn.addEventListener("click", stopVideo);
+
+      loadSavedLists();
+      refreshSavedListOptions();
     </script>
   </body>
 </html>
