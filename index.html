@@ -198,6 +198,17 @@
         white-space: pre-wrap;
       }
 
+      .diag-box {
+        margin-top: 10px;
+        background: #111827;
+        border: 1px solid #374151;
+        border-radius: 10px;
+        padding: 10px;
+        font-size: 0.85rem;
+        line-height: 1.5;
+        white-space: pre-wrap;
+      }
+
       code {
         background: #111827;
         padding: 1px 6px;
@@ -260,6 +271,7 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
         </div>
         <pre id="reloadLog" class="debug-log">尚無事件紀錄。</pre>
         <div id="reloadSnapshot" class="snapshot-box">尚無重載前快照。</div>
+        <div id="reloadDiagnosis" class="diag-box">尚無診斷提示。</div>
       </section>
     </main>
 
@@ -286,6 +298,7 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
       const reloadInfoEl = document.getElementById("reloadInfo");
       const reloadLogEl = document.getElementById("reloadLog");
       const reloadSnapshotEl = document.getElementById("reloadSnapshot");
+      const reloadDiagnosisEl = document.getElementById("reloadDiagnosis");
 
       const startBtn = document.getElementById("startBtn");
       const nextBtn = document.getElementById("nextBtn");
@@ -369,6 +382,7 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
           .map((event) => `[${event.time}] (${event.sessionId}) ${event.type} - ${event.detail}`);
         reloadLogEl.textContent = lines.join("\n");
         renderReloadSnapshotPanel();
+        renderReloadDiagnosisPanel(events);
       }
 
       function appendDebugEvent(type, detail) {
@@ -442,6 +456,44 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
           `- 播放器狀態: ${getPlayerStateLabel(Number(snap.playerState))}\n` +
           `- 本次載入 navigation.type: ${currentNavType}\n` +
           `- ${likelyMessage}`;
+      }
+
+      function renderReloadDiagnosisPanel(events) {
+        const navType = getNavigationType();
+        const hints = [];
+        const host = location.hostname || "";
+        const isFileProtocol = location.protocol === "file:";
+        const isLocalPreview =
+          host === "localhost" ||
+          host === "127.0.0.1" ||
+          host.endsWith(".local") ||
+          host.includes("webview");
+
+        const recentEvents = Array.isArray(events) ? events.slice(-12) : [];
+        const recentBootReloadCount = recentEvents.filter(
+          (e) => e.type === "boot" && String(e.detail || "").includes("navigation.type=reload")
+        ).length;
+        const recentBeforeUnloadCount = recentEvents.filter((e) => e.type === "beforeunload").length;
+
+        if (isFileProtocol) {
+          hints.push("目前是 file:// 開啟，建議改用 GitHub Pages 網址或本機 HTTP server，穩定性通常更好。");
+        }
+
+        if (isLocalPreview) {
+          hints.push("目前看起來在本機預覽環境，若有 Live Reload/檔案監看，可能造成自動重載。");
+        }
+
+        if (navType === "reload") {
+          hints.push("本次是完整 reload，不是 BFCache 還原，較像外部刷新、手動刷新或瀏覽器重建分頁。");
+        }
+
+        if (recentBootReloadCount >= 2 && recentBeforeUnloadCount >= 2) {
+          hints.push("短時間連續出現 reload + beforeunload，疑似外掛或工具在週期性刷新頁面。");
+        }
+
+        hints.push("建議排查：1) 無痕模式測試 2) 關閉 Auto Refresh/AdBlock 類外掛 3) 不用 IDE 內建預覽 4) 改用另一個瀏覽器交叉測試。");
+
+        reloadDiagnosisEl.textContent = `重載來源診斷提示\n- ${hints.join("\n- ")}`;
       }
 
       function initReloadDebugMonitor() {
