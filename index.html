@@ -158,6 +158,41 @@
         font-size: 0.95rem;
       }
 
+      .preview-summary {
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+
+      .preview-grid {
+        margin-top: 12px;
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        gap: 12px;
+      }
+
+      .preview-item {
+        display: block;
+        text-decoration: none;
+        border: 1px solid #374151;
+        border-radius: 10px;
+        overflow: hidden;
+        background: #030712;
+      }
+
+      .preview-item img {
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        object-fit: cover;
+        display: block;
+      }
+
+      .preview-item span {
+        display: block;
+        padding: 8px 10px;
+        color: var(--text);
+        font-size: 0.82rem;
+      }
+
       code {
         background: #111827;
         padding: 1px 6px;
@@ -212,6 +247,11 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
         <div id="meta" class="meta">目前播放：<code>-</code></div>
       </section>
 
+      <section class="card">
+        <div id="previewSummary" class="preview-summary">影片預覽：尚無清單</div>
+        <div id="previewGrid" class="preview-grid"></div>
+      </section>
+
     </main>
 
     <script>
@@ -231,6 +271,8 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
       const listNameInput = document.getElementById("listNameInput");
       const savedListSelect = document.getElementById("savedListSelect");
       const fileInput = document.getElementById("fileInput");
+      const previewSummaryEl = document.getElementById("previewSummary");
+      const previewGridEl = document.getElementById("previewGrid");
 
       const startBtn = document.getElementById("startBtn");
       const nextBtn = document.getElementById("nextBtn");
@@ -344,6 +386,7 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
         }
 
         queue = parsed;
+        renderPreview(queue);
         currentIndex = Math.max(0, Math.min(Number(snapshot.currentIndex) || 0, queue.length - 1));
         renderMeta();
 
@@ -364,6 +407,7 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
 
       function startPlaybackFromInput() {
         queue = parseQueue(inputEl.value);
+        renderPreview(queue);
 
         if (!queue.length) {
           setStatus("沒有解析到有效的 YouTube 連結或影片 ID。", true);
@@ -467,6 +511,42 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
         return [...new Set(ids)];
       }
 
+      function renderPreview(ids) {
+        previewGridEl.innerHTML = "";
+
+        if (!ids.length) {
+          previewSummaryEl.textContent = "影片預覽：尚無清單";
+          return;
+        }
+
+        previewSummaryEl.textContent = `影片預覽：共 ${ids.length} 支`;
+
+        for (let i = 0; i < ids.length; i += 1) {
+          const id = ids[i];
+          const item = document.createElement("a");
+          item.className = "preview-item";
+          item.href = `https://www.youtube.com/watch?v=${id}`;
+          item.target = "_blank";
+          item.rel = "noopener noreferrer";
+
+          const img = document.createElement("img");
+          img.src = `https://i.ytimg.com/vi/${id}/mqdefault.jpg`;
+          img.alt = `影片預覽 ${i + 1}`;
+          img.loading = "lazy";
+
+          const label = document.createElement("span");
+          label.textContent = `#${i + 1}  ${id}`;
+
+          item.appendChild(img);
+          item.appendChild(label);
+          previewGridEl.appendChild(item);
+        }
+      }
+
+      function refreshPreviewFromInput() {
+        renderPreview(parseQueue(inputEl.value));
+      }
+
       function renderMeta() {
         if (!queue.length) {
           metaEl.innerHTML = "目前播放：<code>-</code>";
@@ -535,6 +615,7 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
         }
 
         inputEl.value = savedLists[name].content;
+        refreshPreviewFromInput();
         listNameInput.value = name;
         writePlaybackState();
         setStatus(`已載入清單：${name}`);
@@ -558,6 +639,7 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
         reader.onload = () => {
           const text = typeof reader.result === "string" ? reader.result : "";
           inputEl.value = text;
+          refreshPreviewFromInput();
           writePlaybackState();
           setStatus("已從文字檔匯入內容。可直接播放或儲存成清單。");
         };
@@ -633,6 +715,7 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
       deleteBtn.addEventListener("click", deleteSelectedList);
 
       importBtn.addEventListener("click", () => fileInput.click());
+      inputEl.addEventListener("input", refreshPreviewFromInput);
       fileInput.addEventListener("change", (event) => {
         const file = event.target.files && event.target.files[0];
         if (!file) return;
@@ -647,6 +730,7 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
       loadSavedLists();
       refreshSavedListOptions();
       restoreDraftFromPlaybackState();
+      refreshPreviewFromInput();
       initPlaybackPersistenceEvents();
 
       setStatus("正在載入 YouTube API，載入完成後即可播放。");
