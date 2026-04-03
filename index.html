@@ -52,11 +52,6 @@
         font-size: 1.4rem;
       }
 
-      h2 {
-        margin: 0 0 8px;
-        font-size: 1.05rem;
-      }
-
       p {
         margin: 0;
         color: var(--muted);
@@ -134,11 +129,6 @@
         color: #fee2e2;
       }
 
-      #clearDebugBtn {
-        background: #374151;
-        color: #f9fafb;
-      }
-
       .status {
         margin-top: 10px;
         font-size: 0.92rem;
@@ -166,47 +156,6 @@
       .meta {
         margin-top: 10px;
         font-size: 0.95rem;
-      }
-
-      .debug-info {
-        color: var(--muted);
-        font-size: 0.9rem;
-      }
-
-      .debug-log {
-        margin-top: 10px;
-        background: #030712;
-        border: 1px solid #374151;
-        border-radius: 10px;
-        padding: 10px;
-        min-height: 120px;
-        max-height: 240px;
-        overflow: auto;
-        font-size: 0.82rem;
-        line-height: 1.45;
-        white-space: pre-wrap;
-      }
-
-      .snapshot-box {
-        margin-top: 10px;
-        background: #030712;
-        border: 1px solid #374151;
-        border-radius: 10px;
-        padding: 10px;
-        font-size: 0.85rem;
-        line-height: 1.45;
-        white-space: pre-wrap;
-      }
-
-      .diag-box {
-        margin-top: 10px;
-        background: #111827;
-        border: 1px solid #374151;
-        border-radius: 10px;
-        padding: 10px;
-        font-size: 0.85rem;
-        line-height: 1.5;
-        white-space: pre-wrap;
       }
 
       code {
@@ -263,24 +212,11 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
         <div id="meta" class="meta">目前播放：<code>-</code></div>
       </section>
 
-      <section class="card">
-        <h2>重載偵測與原因紀錄</h2>
-        <div id="reloadInfo" class="debug-info">尚無資料</div>
-        <div class="controls">
-          <button id="clearDebugBtn" type="button">清除紀錄</button>
-        </div>
-        <pre id="reloadLog" class="debug-log">尚無事件紀錄。</pre>
-        <div id="reloadSnapshot" class="snapshot-box">尚無重載前快照。</div>
-        <div id="reloadDiagnosis" class="diag-box">尚無診斷提示。</div>
-      </section>
     </main>
 
     <script>
       const STORAGE_KEY = "yt-loop-player-saved-lists";
-      const DEBUG_LOG_KEY = "yt-loop-player-debug-log";
-      const DEBUG_SESSION_KEY = "yt-loop-player-session-id";
       const PLAYBACK_STATE_KEY = "yt-loop-player-playback-state";
-      const PRE_RELOAD_SNAPSHOT_KEY = "yt-loop-player-pre-reload-snapshot";
 
       let ytPlayer;
       let queue = [];
@@ -295,10 +231,6 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
       const listNameInput = document.getElementById("listNameInput");
       const savedListSelect = document.getElementById("savedListSelect");
       const fileInput = document.getElementById("fileInput");
-      const reloadInfoEl = document.getElementById("reloadInfo");
-      const reloadLogEl = document.getElementById("reloadLog");
-      const reloadSnapshotEl = document.getElementById("reloadSnapshot");
-      const reloadDiagnosisEl = document.getElementById("reloadDiagnosis");
 
       const startBtn = document.getElementById("startBtn");
       const nextBtn = document.getElementById("nextBtn");
@@ -308,7 +240,6 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
       const deleteBtn = document.getElementById("deleteBtn");
       const importBtn = document.getElementById("importBtn");
       const exportBtn = document.getElementById("exportBtn");
-      const clearDebugBtn = document.getElementById("clearDebugBtn");
 
       let savedLists = {};
 
@@ -317,228 +248,20 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
         statusEl.classList.toggle("error", isError);
       }
 
-      function getSessionId() {
-        const current = sessionStorage.getItem(DEBUG_SESSION_KEY);
-        if (current) return current;
-        const id = `s-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-        sessionStorage.setItem(DEBUG_SESSION_KEY, id);
-        return id;
-      }
-
-      function nowText() {
-        return new Date().toLocaleString("zh-TW", { hour12: false });
-      }
-
-      function getNavigationType() {
-        const nav = performance.getEntriesByType("navigation")[0];
-        return nav ? nav.type : "unknown";
-      }
-
-      function inferLoadReason(navType) {
-        if (navType === "reload") return "手動重新整理或程式觸發 reload";
-        if (navType === "back_forward") return "返回/前進或 BFCache 還原";
-        if (navType === "navigate") return "新開頁、輸入網址、或外部連結進入";
-        return "無法判定";
-      }
-
-      function getPlayerStateLabel(state) {
-        if (state === 0) return "ENDED(0)";
-        if (state === 1) return "PLAYING(1)";
-        if (state === 2) return "PAUSED(2)";
-        if (state === 3) return "BUFFERING(3)";
-        if (state === 5) return "CUED(5)";
-        if (state === -1) return "UNSTARTED(-1)";
-        return `UNKNOWN(${state})`;
-      }
-
-      function readDebugEvents() {
-        try {
-          const raw = localStorage.getItem(DEBUG_LOG_KEY);
-          const events = raw ? JSON.parse(raw) : [];
-          return Array.isArray(events) ? events : [];
-        } catch (_) {
-          return [];
-        }
-      }
-
-      function writeDebugEvents(events) {
-        try {
-          localStorage.setItem(DEBUG_LOG_KEY, JSON.stringify(events.slice(-80)));
-        } catch (_) {}
-      }
-
-      function renderDebugPanel() {
-        const navType = getNavigationType();
-        reloadInfoEl.textContent = `本次載入型態：${navType}；推測原因：${inferLoadReason(navType)}`;
-
-        const events = readDebugEvents();
-        if (!events.length) {
-          reloadLogEl.textContent = "尚無事件紀錄。";
-          return;
-        }
-
-        const lines = events
-          .slice(-25)
-          .map((event) => `[${event.time}] (${event.sessionId}) ${event.type} - ${event.detail}`);
-        reloadLogEl.textContent = lines.join("\n");
-        renderReloadSnapshotPanel();
-        renderReloadDiagnosisPanel(events);
-      }
-
-      function appendDebugEvent(type, detail) {
-        const events = readDebugEvents();
-        events.push({
-          time: nowText(),
-          sessionId: getSessionId(),
-          type,
-          detail,
-        });
-        writeDebugEvents(events);
-        renderDebugPanel();
-      }
-
-      function readPreReloadSnapshot() {
-        try {
-          const raw = localStorage.getItem(PRE_RELOAD_SNAPSHOT_KEY);
-          if (!raw) return null;
-          const parsed = JSON.parse(raw);
-          return parsed && typeof parsed === "object" ? parsed : null;
-        } catch (_) {
-          return null;
-        }
-      }
-
-      function writePreReloadSnapshot(trigger) {
-        try {
-          const state = readPlaybackState();
-          if (!state) return;
-
-          localStorage.setItem(
-            PRE_RELOAD_SNAPSHOT_KEY,
-            JSON.stringify({
-              trigger,
-              capturedAt: Date.now(),
-              capturedAtText: nowText(),
-              navTypeAtCapture: getNavigationType(),
-              currentIndex: Number(state.currentIndex) || 0,
-              currentTime: Number(state.currentTime) || 0,
-              playerState: Number(state.playerState),
-              queueLength: Array.isArray(state.queue) ? state.queue.length : 0,
-              updatedAt: Number(state.updatedAt) || 0,
-            })
-          );
-        } catch (_) {}
-      }
-
-      function renderReloadSnapshotPanel() {
-        const snap = readPreReloadSnapshot();
-        const currentNavType = getNavigationType();
-
-        if (!snap) {
-          reloadSnapshotEl.textContent = "尚無重載前快照。";
-          return;
-        }
-
-        const ageSec = Math.max(0, Math.floor((Date.now() - (Number(snap.capturedAt) || 0)) / 1000));
-        const likelyMessage =
-          currentNavType === "reload"
-            ? "判讀：這次是完整 reload（較像外部刷新/手動刷新，不是 BFCache 還原）。"
-            : "判讀：這次不是完整 reload，可能是一般導頁或返回快取。";
-
-        reloadSnapshotEl.textContent =
-          `最近一次重載前快照\n` +
-          `- 快照時間: ${snap.capturedAtText || "-"} (${ageSec} 秒前)\n` +
-          `- 觸發事件: ${snap.trigger || "-"}\n` +
-          `- 快照當下 navigation.type: ${snap.navTypeAtCapture || "-"}\n` +
-          `- 播放清單長度: ${snap.queueLength ?? "-"}\n` +
-          `- 播放位置: 第 ${(Number(snap.currentIndex) || 0) + 1} 支\n` +
-          `- 秒數: ${Math.max(0, Number(snap.currentTime) || 0)} 秒\n` +
-          `- 播放器狀態: ${getPlayerStateLabel(Number(snap.playerState))}\n` +
-          `- 本次載入 navigation.type: ${currentNavType}\n` +
-          `- ${likelyMessage}`;
-      }
-
-      function renderReloadDiagnosisPanel(events) {
-        const navType = getNavigationType();
-        const hints = [];
-        const host = location.hostname || "";
-        const isFileProtocol = location.protocol === "file:";
-        const isLocalPreview =
-          host === "localhost" ||
-          host === "127.0.0.1" ||
-          host.endsWith(".local") ||
-          host.includes("webview");
-
-        const recentEvents = Array.isArray(events) ? events.slice(-12) : [];
-        const recentBootReloadCount = recentEvents.filter(
-          (e) => e.type === "boot" && String(e.detail || "").includes("navigation.type=reload")
-        ).length;
-        const recentBeforeUnloadCount = recentEvents.filter((e) => e.type === "beforeunload").length;
-
-        if (isFileProtocol) {
-          hints.push("目前是 file:// 開啟，建議改用 GitHub Pages 網址或本機 HTTP server，穩定性通常更好。");
-        }
-
-        if (isLocalPreview) {
-          hints.push("目前看起來在本機預覽環境，若有 Live Reload/檔案監看，可能造成自動重載。");
-        }
-
-        if (navType === "reload") {
-          hints.push("本次是完整 reload，不是 BFCache 還原，較像外部刷新、手動刷新或瀏覽器重建分頁。");
-        }
-
-        if (recentBootReloadCount >= 2 && recentBeforeUnloadCount >= 2) {
-          hints.push("短時間連續出現 reload + beforeunload，疑似外掛或工具在週期性刷新頁面。");
-        }
-
-        hints.push("建議排查：1) 無痕模式測試 2) 關閉 Auto Refresh/AdBlock 類外掛 3) 不用 IDE 內建預覽 4) 改用另一個瀏覽器交叉測試。");
-
-        reloadDiagnosisEl.textContent = `重載來源診斷提示\n- ${hints.join("\n- ")}`;
-      }
-
-      function initReloadDebugMonitor() {
-        appendDebugEvent("boot", `navigation.type=${getNavigationType()}`);
-
-        window.addEventListener("pageshow", (event) => {
-          appendDebugEvent("pageshow", `persisted=${event.persisted}`);
-        });
-
-        window.addEventListener("pagehide", (event) => {
+      function initPlaybackPersistenceEvents() {
+        window.addEventListener("pagehide", () => {
           writePlaybackState();
-          writePreReloadSnapshot("pagehide");
-          appendDebugEvent("pagehide", `persisted=${event.persisted}`);
         });
 
         window.addEventListener("beforeunload", () => {
           writePlaybackState();
-          writePreReloadSnapshot("beforeunload");
-          appendDebugEvent("beforeunload", "即將離開頁面");
         });
 
         document.addEventListener("visibilitychange", () => {
           if (document.visibilityState === "hidden") {
             writePlaybackState();
-            writePreReloadSnapshot("visibilitychange:hidden");
           }
-          appendDebugEvent("visibilitychange", `state=${document.visibilityState}`);
         });
-
-        window.addEventListener("online", () => {
-          appendDebugEvent("network", "online");
-        });
-
-        window.addEventListener("offline", () => {
-          appendDebugEvent("network", "offline");
-        });
-
-        clearDebugBtn.addEventListener("click", () => {
-          localStorage.removeItem(DEBUG_LOG_KEY);
-          localStorage.removeItem(PRE_RELOAD_SNAPSHOT_KEY);
-          renderDebugPanel();
-          setStatus("已清除重載偵測紀錄。");
-        });
-
-        renderDebugPanel();
       }
 
       function readPlaybackState() {
@@ -636,7 +359,6 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
           setStatus(`已自動續播：第 ${currentIndex + 1} 支，從 ${startSeconds} 秒繼續。`);
         }
 
-        appendDebugEvent("resume", `index=${currentIndex}, sec=${startSeconds}, state=${state}`);
         return true;
       }
 
@@ -925,7 +647,7 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
       loadSavedLists();
       refreshSavedListOptions();
       restoreDraftFromPlaybackState();
-      initReloadDebugMonitor();
+      initPlaybackPersistenceEvents();
 
       setStatus("正在載入 YouTube API，載入完成後即可播放。");
 
