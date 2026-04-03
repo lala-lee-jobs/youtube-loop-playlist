@@ -52,6 +52,11 @@
         font-size: 1.4rem;
       }
 
+      h2 {
+        margin: 0 0 8px;
+        font-size: 1.05rem;
+      }
+
       p {
         margin: 0;
         color: var(--muted);
@@ -129,6 +134,11 @@
         color: #fee2e2;
       }
 
+      #clearDebugBtn {
+        background: #374151;
+        color: #f9fafb;
+      }
+
       .status {
         margin-top: 10px;
         font-size: 0.92rem;
@@ -156,6 +166,25 @@
       .meta {
         margin-top: 10px;
         font-size: 0.95rem;
+      }
+
+      .debug-info {
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+
+      .debug-log {
+        margin-top: 10px;
+        background: #030712;
+        border: 1px solid #374151;
+        border-radius: 10px;
+        padding: 10px;
+        min-height: 120px;
+        max-height: 240px;
+        overflow: auto;
+        font-size: 0.82rem;
+        line-height: 1.45;
+        white-space: pre-wrap;
       }
 
       code {
@@ -211,16 +240,29 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
         </div>
         <div id="meta" class="meta">目前播放：<code>-</code></div>
       </section>
+
+      <section class="card">
+        <h2>重載偵測與原因紀錄</h2>
+        <div id="reloadInfo" class="debug-info">尚無資料</div>
+        <div class="controls">
+          <button id="clearDebugBtn" type="button">清除紀錄</button>
+        </div>
+        <pre id="reloadLog" class="debug-log">尚無事件紀錄。</pre>
+      </section>
     </main>
 
     <script>
       const STORAGE_KEY = "yt-loop-player-saved-lists";
+      const DEBUG_LOG_KEY = "yt-loop-player-debug-log";
+      const DEBUG_SESSION_KEY = "yt-loop-player-session-id";
+      const PLAYBACK_STATE_KEY = "yt-loop-player-playback-state";
 
       let ytPlayer;
       let queue = [];
       let currentIndex = 0;
       let apiReady = false;
       let pendingStart = false;
+      let playbackSaveTimer = null;
 
       const statusEl = document.getElementById("status");
       const metaEl = document.getElementById("meta");
@@ -228,6 +270,8 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
       const listNameInput = document.getElementById("listNameInput");
       const savedListSelect = document.getElementById("savedListSelect");
       const fileInput = document.getElementById("fileInput");
+      const reloadInfoEl = document.getElementById("reloadInfo");
+      const reloadLogEl = document.getElementById("reloadLog");
 
       const startBtn = document.getElementById("startBtn");
       const nextBtn = document.getElementById("nextBtn");
@@ -237,12 +281,221 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
       const deleteBtn = document.getElementById("deleteBtn");
       const importBtn = document.getElementById("importBtn");
       const exportBtn = document.getElementById("exportBtn");
+      const clearDebugBtn = document.getElementById("clearDebugBtn");
 
       let savedLists = {};
 
       function setStatus(message, isError = false) {
         statusEl.textContent = message;
         statusEl.classList.toggle("error", isError);
+      }
+
+      function getSessionId() {
+        const current = sessionStorage.getItem(DEBUG_SESSION_KEY);
+        if (current) return current;
+        const id = `s-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+        sessionStorage.setItem(DEBUG_SESSION_KEY, id);
+        return id;
+      }
+
+      function nowText() {
+        return new Date().toLocaleString("zh-TW", { hour12: false });
+      }
+
+      function getNavigationType() {
+        const nav = performance.getEntriesByType("navigation")[0];
+        return nav ? nav.type : "unknown";
+      }
+
+      function inferLoadReason(navType) {
+        if (navType === "reload") return "手動重新整理或程式觸發 reload";
+        if (navType === "back_forward") return "返回/前進或 BFCache 還原";
+        if (navType === "navigate") return "新開頁、輸入網址、或外部連結進入";
+        return "無法判定";
+      }
+
+      function readDebugEvents() {
+        try {
+          const raw = localStorage.getItem(DEBUG_LOG_KEY);
+          const events = raw ? JSON.parse(raw) : [];
+          return Array.isArray(events) ? events : [];
+        } catch (_) {
+          return [];
+        }
+      }
+
+      function writeDebugEvents(events) {
+        try {
+          localStorage.setItem(DEBUG_LOG_KEY, JSON.stringify(events.slice(-80)));
+        } catch (_) {}
+      }
+
+      function renderDebugPanel() {
+        const navType = getNavigationType();
+        reloadInfoEl.textContent = `本次載入型態：${navType}；推測原因：${inferLoadReason(navType)}`;
+
+        const events = readDebugEvents();
+        if (!events.length) {
+          reloadLogEl.textContent = "尚無事件紀錄。";
+          return;
+        }
+
+        const lines = events
+          .slice(-25)
+          .map((event) => `[${event.time}] (${event.sessionId}) ${event.type} - ${event.detail}`);
+        reloadLogEl.textContent = lines.join("\n");
+      }
+
+      function appendDebugEvent(type, detail) {
+        const events = readDebugEvents();
+        events.push({
+          time: nowText(),
+          sessionId: getSessionId(),
+          type,
+          detail,
+        });
+        writeDebugEvents(events);
+        renderDebugPanel();
+      }
+
+      function initReloadDebugMonitor() {
+        appendDebugEvent("boot", `navigation.type=${getNavigationType()}`);
+
+        window.addEventListener("pageshow", (event) => {
+          appendDebugEvent("pageshow", `persisted=${event.persisted}`);
+        });
+
+        window.addEventListener("pagehide", (event) => {
+          writePlaybackState();
+          appendDebugEvent("pagehide", `persisted=${event.persisted}`);
+        });
+
+        window.addEventListener("beforeunload", () => {
+          writePlaybackState();
+          appendDebugEvent("beforeunload", "即將離開頁面");
+        });
+
+        document.addEventListener("visibilitychange", () => {
+          if (document.visibilityState === "hidden") {
+            writePlaybackState();
+          }
+          appendDebugEvent("visibilitychange", `state=${document.visibilityState}`);
+        });
+
+        window.addEventListener("online", () => {
+          appendDebugEvent("network", "online");
+        });
+
+        window.addEventListener("offline", () => {
+          appendDebugEvent("network", "offline");
+        });
+
+        clearDebugBtn.addEventListener("click", () => {
+          localStorage.removeItem(DEBUG_LOG_KEY);
+          renderDebugPanel();
+          setStatus("已清除重載偵測紀錄。");
+        });
+
+        renderDebugPanel();
+      }
+
+      function readPlaybackState() {
+        try {
+          const raw = localStorage.getItem(PLAYBACK_STATE_KEY);
+          if (!raw) return null;
+          const parsed = JSON.parse(raw);
+          return parsed && typeof parsed === "object" ? parsed : null;
+        } catch (_) {
+          return null;
+        }
+      }
+
+      function writePlaybackState() {
+        try {
+          const parsedFromInput = parseQueue(inputEl.value);
+          const effectiveQueue = queue.length ? queue : parsedFromInput;
+          if (!effectiveQueue.length) return;
+
+          const safeIndex = queue.length
+            ? Math.max(0, Math.min(currentIndex, queue.length - 1))
+            : 0;
+
+          let currentTime = 0;
+          let playerState = -1;
+          if (ytPlayer && typeof ytPlayer.getCurrentTime === "function") {
+            currentTime = Number(ytPlayer.getCurrentTime()) || 0;
+          }
+          if (ytPlayer && typeof ytPlayer.getPlayerState === "function") {
+            playerState = Number(ytPlayer.getPlayerState());
+          }
+
+          localStorage.setItem(
+            PLAYBACK_STATE_KEY,
+            JSON.stringify({
+              inputText: inputEl.value,
+              listName: listNameInput.value || "",
+              queue: effectiveQueue,
+              currentIndex: safeIndex,
+              currentTime: Math.max(0, Math.floor(currentTime)),
+              playerState,
+              updatedAt: Date.now(),
+            })
+          );
+        } catch (_) {}
+      }
+
+      function restoreDraftFromPlaybackState() {
+        const snapshot = readPlaybackState();
+        if (!snapshot) return;
+
+        if (!inputEl.value.trim() && typeof snapshot.inputText === "string") {
+          inputEl.value = snapshot.inputText;
+        }
+        if (!listNameInput.value.trim() && typeof snapshot.listName === "string") {
+          listNameInput.value = snapshot.listName;
+        }
+      }
+
+      function tryResumePlayback() {
+        const snapshot = readPlaybackState();
+        if (!snapshot || !apiReady || !ytPlayer) return false;
+
+        // 只恢復最近 24 小時內的播放，避免載入過舊狀態。
+        const updatedAt = Number(snapshot.updatedAt) || 0;
+        if (!updatedAt || Date.now() - updatedAt > 24 * 60 * 60 * 1000) {
+          return false;
+        }
+
+        const sourceText =
+          typeof snapshot.inputText === "string" && snapshot.inputText.trim()
+            ? snapshot.inputText
+            : inputEl.value;
+        const parsed = parseQueue(sourceText);
+        if (!parsed.length) return false;
+
+        inputEl.value = sourceText;
+        if (typeof snapshot.listName === "string" && snapshot.listName.trim()) {
+          listNameInput.value = snapshot.listName;
+        }
+
+        queue = parsed;
+        currentIndex = Math.max(0, Math.min(Number(snapshot.currentIndex) || 0, queue.length - 1));
+        renderMeta();
+
+        const videoId = queue[currentIndex];
+        const startSeconds = Math.max(0, Number(snapshot.currentTime) || 0);
+        const state = Number(snapshot.playerState);
+
+        if (state === YT.PlayerState.PAUSED || state === YT.PlayerState.CUED) {
+          ytPlayer.cueVideoById({ videoId, startSeconds });
+          setStatus(`已還原播放清單，停在第 ${currentIndex + 1} 支 ${startSeconds} 秒。`);
+        } else {
+          ytPlayer.loadVideoById({ videoId, startSeconds });
+          setStatus(`已自動續播：第 ${currentIndex + 1} 支，從 ${startSeconds} 秒繼續。`);
+        }
+
+        appendDebugEvent("resume", `index=${currentIndex}, sec=${startSeconds}, state=${state}`);
+        return true;
       }
 
       function startPlaybackFromInput() {
@@ -365,6 +618,7 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
         const videoId = queue[currentIndex];
         ytPlayer.loadVideoById(videoId);
         renderMeta();
+        writePlaybackState();
         setStatus(`正在播放第 ${currentIndex + 1} 支影片。`);
       }
 
@@ -379,6 +633,7 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
       function stopVideo() {
         if (ytPlayer && typeof ytPlayer.stopVideo === "function") {
           ytPlayer.stopVideo();
+          writePlaybackState();
           setStatus("已停止播放。");
         }
       }
@@ -403,6 +658,7 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
         };
 
         persistSavedLists();
+        writePlaybackState();
         refreshSavedListOptions(name);
         setStatus(`已儲存清單：${name}`);
       }
@@ -416,6 +672,7 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
 
         inputEl.value = savedLists[name].content;
         listNameInput.value = name;
+        writePlaybackState();
         setStatus(`已載入清單：${name}`);
       }
 
@@ -437,6 +694,7 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
         reader.onload = () => {
           const text = typeof reader.result === "string" ? reader.result : "";
           inputEl.value = text;
+          writePlaybackState();
           setStatus("已從文字檔匯入內容。可直接播放或儲存成清單。");
         };
         reader.onerror = () => {
@@ -484,11 +742,14 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
               if (pendingStart) {
                 setStatus("播放器已就緒，正在自動開始播放。");
                 startPlaybackFromInput();
-              } else {
+              } else if (!tryResumePlayback()) {
                 setStatus("播放器已就緒，請貼上連結後按開始播放。");
+              } else {
+                // 已在 tryResumePlayback 內顯示狀態
               }
             },
             onStateChange: (event) => {
+              writePlaybackState();
               if (event.data === YT.PlayerState.ENDED) {
                 nextVideo();
               }
@@ -521,8 +782,16 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
 
       loadSavedLists();
       refreshSavedListOptions();
+      restoreDraftFromPlaybackState();
+      initReloadDebugMonitor();
 
       setStatus("正在載入 YouTube API，載入完成後即可播放。");
+
+      playbackSaveTimer = window.setInterval(() => {
+        if (apiReady && ytPlayer) {
+          writePlaybackState();
+        }
+      }, 5000);
     </script>
   </body>
 </html>
