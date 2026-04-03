@@ -171,26 +171,62 @@
       }
 
       .preview-item {
-        display: block;
-        text-decoration: none;
+        position: relative;
         border: 1px solid #374151;
         border-radius: 10px;
         overflow: hidden;
         background: #030712;
+        cursor: grab;
       }
 
-      .preview-item img {
+      .preview-item.dragging {
+        opacity: 0.55;
+      }
+
+      .preview-item.drag-over {
+        border-color: #22c55e;
+      }
+
+      .preview-link {
+        display: block;
+        text-decoration: none;
+      }
+
+      .preview-link img {
         width: 100%;
         aspect-ratio: 16 / 9;
         object-fit: cover;
         display: block;
       }
 
-      .preview-item span {
+      .preview-title {
         display: block;
-        padding: 8px 10px;
+        padding: 8px 10px 4px;
         color: var(--text);
         font-size: 0.82rem;
+        line-height: 1.35;
+      }
+
+      .preview-id {
+        display: block;
+        padding: 0 10px 10px;
+        color: var(--muted);
+        font-size: 0.74rem;
+      }
+
+      .preview-delete {
+        position: absolute;
+        top: 6px;
+        right: 6px;
+        width: 26px;
+        height: 26px;
+        border-radius: 999px;
+        border: 0;
+        background: rgba(185, 28, 28, 0.9);
+        color: #fee2e2;
+        font-weight: 800;
+        line-height: 1;
+        cursor: pointer;
       }
 
       code {
@@ -264,6 +300,9 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
       let apiReady = false;
       let pendingStart = false;
       let playbackSaveTimer = null;
+      let currentPreviewIds = [];
+      let draggingIndex = -1;
+      const videoTitleCache = new Map();
 
       const statusEl = document.getElementById("status");
       const metaEl = document.getElementById("meta");
@@ -511,7 +550,98 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
         return [...new Set(ids)];
       }
 
+      function idsToInputText(ids) {
+        return ids.map((id) => `https://www.youtube.com/watch?v=${id}`).join("\n");
+      }
+
+      function syncPlaylistFromPreview(ids) {
+        const nextIds = [...ids];
+        const currentVideoId = queue[currentIndex];
+
+        currentPreviewIds = nextIds;
+        inputEl.value = idsToInputText(nextIds);
+        queue = [...nextIds];
+
+        if (!queue.length) {
+          if (ytPlayer && typeof ytPlayer.stopVideo === "function") {
+            ytPlayer.stopVideo();
+          }
+          currentIndex = 0;
+          renderMeta();
+          writePlaybackState();
+          renderPreview(queue);
+          return;
+        }
+
+        if (currentVideoId) {
+          const newIndex = queue.indexOf(currentVideoId);
+          if (newIndex >= 0) {
+            currentIndex = newIndex;
+          } else {
+            currentIndex = Math.min(currentIndex, queue.length - 1);
+          }
+        } else {
+          currentIndex = Math.min(currentIndex, queue.length - 1);
+        }
+
+        renderMeta();
+        writePlaybackState();
+        autoSaveSelectedListFromInput();
+        renderPreview(queue);
+      }
+
+      function autoSaveSelectedListFromInput() {
+        const selectedName = savedListSelect.value;
+        if (!selectedName || !savedLists[selectedName]) return;
+
+        savedLists[selectedName] = {
+          content: inputEl.value.trim(),
+          updatedAt: new Date().toISOString(),
+        };
+        persistSavedLists();
+        refreshSavedListOptions(selectedName);
+      }
+
+      async function fetchVideoTitle(id) {
+        if (videoTitleCache.has(id)) return videoTitleCache.get(id);
+
+        const endpoint = `https://www.youtube.com/oembed?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${id}`)}&format=json`;
+        try {
+          const res = await fetch(endpoint);
+          if (!res.ok) throw new Error("oEmbed request failed");
+          const data = await res.json();
+          const title = data && data.title ? data.title : id;
+          videoTitleCache.set(id, title);
+          return title;
+        } catch (_) {
+          const fallback = id;
+          videoTitleCache.set(id, fallback);
+          return fallback;
+        }
+      }
+
+      function reorderPreviewItem(fromIndex, toIndex) {
+        if (fromIndex === toIndex) return;
+        if (fromIndex < 0 || toIndex < 0) return;
+        if (fromIndex >= currentPreviewIds.length || toIndex >= currentPreviewIds.length) return;
+
+        const next = [...currentPreviewIds];
+        const [moved] = next.splice(fromIndex, 1);
+        next.splice(toIndex, 0, moved);
+        syncPlaylistFromPreview(next);
+        setStatus(`已調整順序：第 ${fromIndex + 1} 支移到第 ${toIndex + 1} 位。`);
+      }
+
+      function removePreviewItem(index) {
+        if (index < 0 || index >= currentPreviewIds.length) return;
+        const next = [...currentPreviewIds];
+        next.splice(index, 1);
+        syncPlaylistFromPreview(next);
+        setStatus("已從清單刪除該影片。");
+      }
+
       function renderPreview(ids) {
+        currentPreviewIds = [...ids];
         previewGridEl.innerHTML = "";
 
         if (!ids.length) {
@@ -523,23 +653,86 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
 
         for (let i = 0; i < ids.length; i += 1) {
           const id = ids[i];
-          const item = document.createElement("a");
+          const item = document.createElement("div");
           item.className = "preview-item";
-          item.href = `https://www.youtube.com/watch?v=${id}`;
-          item.target = "_blank";
-          item.rel = "noopener noreferrer";
+          item.draggable = true;
+
+          item.addEventListener("dragstart", (event) => {
+            draggingIndex = i;
+            item.classList.add("dragging");
+            if (event.dataTransfer) {
+              event.dataTransfer.effectAllowed = "move";
+              event.dataTransfer.setData("text/plain", String(i));
+            }
+          });
+
+          item.addEventListener("dragend", () => {
+            draggingIndex = -1;
+            item.classList.remove("dragging");
+            const highlighted = previewGridEl.querySelectorAll(".drag-over");
+            for (const node of highlighted) node.classList.remove("drag-over");
+          });
+
+          item.addEventListener("dragover", (event) => {
+            event.preventDefault();
+            item.classList.add("drag-over");
+          });
+
+          item.addEventListener("dragleave", () => {
+            item.classList.remove("drag-over");
+          });
+
+          item.addEventListener("drop", (event) => {
+            event.preventDefault();
+            item.classList.remove("drag-over");
+            const from = draggingIndex;
+            const to = i;
+            reorderPreviewItem(from, to);
+          });
+
+          const link = document.createElement("a");
+          link.className = "preview-link";
+          link.href = `https://www.youtube.com/watch?v=${id}`;
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
 
           const img = document.createElement("img");
           img.src = `https://i.ytimg.com/vi/${id}/mqdefault.jpg`;
           img.alt = `影片預覽 ${i + 1}`;
           img.loading = "lazy";
 
-          const label = document.createElement("span");
-          label.textContent = `#${i + 1}  ${id}`;
+          const titleEl = document.createElement("span");
+          titleEl.className = "preview-title";
+          titleEl.dataset.videoId = id;
+          titleEl.textContent = "載入標題中...";
 
-          item.appendChild(img);
-          item.appendChild(label);
+          const idEl = document.createElement("span");
+          idEl.className = "preview-id";
+          idEl.textContent = `#${i + 1}  ${id}`;
+
+          const deleteBtn = document.createElement("button");
+          deleteBtn.type = "button";
+          deleteBtn.className = "preview-delete";
+          deleteBtn.textContent = "×";
+          deleteBtn.title = "從清單刪除";
+          deleteBtn.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            removePreviewItem(i);
+          });
+
+          link.appendChild(img);
+          link.appendChild(titleEl);
+          link.appendChild(idEl);
+          item.appendChild(link);
+          item.appendChild(deleteBtn);
           previewGridEl.appendChild(item);
+
+          fetchVideoTitle(id).then((title) => {
+            if (titleEl.dataset.videoId === id) {
+              titleEl.textContent = title;
+            }
+          });
         }
       }
 
