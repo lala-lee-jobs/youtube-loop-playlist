@@ -887,10 +887,18 @@ https://www.youtube.com/shorts/aqz-KE-bpKQ"
 
         inputEl.value = savedLists[name].content;
         addNumberLabelsToInput();
-        refreshPreviewFromInput();
+        queue = parseQueue(inputEl.value);
+        currentIndex = 0;
+        renderPreview(queue);
+        renderMeta();
+
+        if (apiReady && ytPlayer && queue.length) {
+          ytPlayer.cueVideoById(queue[0]);
+        }
+
         listNameInput.value = name;
         writePlaybackState();
-        setStatus(`已載入清單：${name}`);
+        setStatus(`已載入清單：${name}，播放器已同步到第 1 支。`);
       }
 
       function deleteSelectedList() {
